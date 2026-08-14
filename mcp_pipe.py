@@ -34,9 +34,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configure logging
+log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=getattr(logging, log_level, logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True
 )
 logger = logging.getLogger('MCP_PIPE')
 
@@ -112,11 +114,28 @@ async def pipe_websocket_to_process(websocket, process, target):
         while True:
             # Read message from WebSocket
             message = await websocket.recv()
-            logger.debug(f"[{target}] << {message[:120]}...")
-            
-            # Write to process stdin (in text mode)
             if isinstance(message, bytes):
                 message = message.decode('utf-8')
+            
+            # Log incoming MCP requests at INFO level
+            try:
+                msg_json = json.loads(message)
+                method = msg_json.get("method")
+                if method == "tools/call":
+                    params = msg_json.get("params", {})
+                    tool_name = params.get("name")
+                    args = params.get("arguments", {})
+                    logger.info(f"[{target}] 📥 [Tool Request] {tool_name} with args: {args}")
+                elif method == "tools/list":
+                    logger.info(f"[{target}] 📋 [Tools List] Xiaozhi requested tools list")
+                elif method:
+                    logger.info(f"[{target}] 📥 [MCP Request] method={method}")
+                else:
+                    logger.debug(f"[{target}] << {message[:120]}...")
+            except Exception:
+                logger.debug(f"[{target}] << {message[:120]}...")
+            
+            # Write to process stdin (in text mode)
             process.stdin.write(message + '\n')
             process.stdin.flush()
     except Exception as e:
@@ -138,9 +157,20 @@ async def pipe_process_to_websocket(process, websocket, target):
                 logger.info(f"[{target}] Process has ended output")
                 break
                 
+            # Log outgoing MCP responses at INFO level
+            try:
+                resp_json = json.loads(data)
+                if "result" in resp_json:
+                    result_data = resp_json.get("result")
+                    logger.info(f"[{target}] 📤 [Tool Response] {result_data}")
+                elif "error" in resp_json:
+                    logger.error(f"[{target}] ❌ [Tool Error] {resp_json.get('error')}")
+                else:
+                    logger.debug(f"[{target}] >> {data[:120]}...")
+            except Exception:
+                logger.debug(f"[{target}] >> {data[:120]}...")
+
             # Send data to WebSocket
-            logger.debug(f"[{target}] >> {data[:120]}...")
-            # In text mode, data is already a string, no need to decode
             await websocket.send(data)
     except Exception as e:
         logger.error(f"[{target}] Error in process to WebSocket pipe: {e}")

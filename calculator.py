@@ -3,6 +3,12 @@ from fastmcp import FastMCP
 import sys
 import logging
 
+logging.basicConfig(
+    stream=sys.stderr,
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True
+)
 logger = logging.getLogger('Calculator')
 
 # Fix UTF-8 encoding for Windows console
